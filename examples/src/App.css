@@ -1,0 +1,28 @@
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.App {
+  width: 100%;
+}
+
+code {
+  background: #f4f4f4;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+}
+
+pre code {
+  display: block;
+  padding: 10px;
+  overflow-x: auto;
+}
+
+ul {
+  max-width: 600px;
+  margin: 0 auto;
+}

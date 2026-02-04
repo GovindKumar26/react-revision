@@ -6903,6 +6903,785 @@ function InfinitePosts() {
 
 ---
 
+### ♾️ Infinite Scroll with TanStack Query - Complete Guide
+
+#### What is Infinite Scroll?
+
+**Infinite scrolling** loads more data automatically as the user scrolls down. Common in:
+- Social media feeds (Twitter, Instagram)
+- Product listings (Amazon, eBay)
+- Search results
+- News feeds
+- Image galleries
+
+**Benefits:**
+- ✅ Better UX - No pagination clicks
+- ✅ Continuous browsing
+- ✅ Mobile-friendly
+- ✅ Reduced cognitive load
+
+---
+
+#### useInfiniteQuery - Core Concepts
+
+**Key differences from useQuery:**
+
+| Feature | useQuery | useInfiniteQuery |
+|---------|----------|------------------|
+| **Data structure** | Single page | Array of pages |
+| **Parameters** | None | `pageParam` |
+| **Methods** | `refetch()` | `fetchNextPage()`, `fetchPreviousPage()` |
+| **Use case** | Single dataset | Paginated/infinite data |
+
+---
+
+#### Basic Infinite Scroll Setup
+
+##### Step 1: API Structure
+
+```jsx
+// API should return:
+// {
+//   data: [...items],
+//   nextCursor: 123,  // or nextPage: 2
+//   hasMore: true
+// }
+
+// Example API endpoint
+GET /api/posts?cursor=0&limit=10
+// Response:
+{
+  posts: [
+    { id: 1, title: "Post 1" },
+    { id: 2, title: "Post 2" },
+    // ... 10 items
+  ],
+  nextCursor: 10,
+  hasMore: true
+}
+```
+
+##### Step 2: useInfiniteQuery Implementation
+
+```jsx
+import { useInfiniteQuery } from '@tanstack/react-query';
+
+function PostList() {
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+    isError,
+    error
+  } = useInfiniteQuery({
+    queryKey: ['posts'],
+    queryFn: async ({ pageParam = 0 }) => {
+      const res = await fetch(`/api/posts?cursor=${pageParam}&limit=10`);
+      return res.json();
+    },
+    getNextPageParam: (lastPage) => {
+      // Return next cursor or undefined to stop
+      return lastPage.hasMore ? lastPage.nextCursor : undefined;
+    },
+    initialPageParam: 0  // Starting cursor/page
+  });
+
+  if (isLoading) return <div>Loading...</div>;
+  if (isError) return <div>Error: {error.message}</div>;
+
+  return (
+    <div>
+      {/* Render all pages */}
+      {data.pages.map((page, pageIndex) => (
+        <div key={pageIndex}>
+          {page.posts.map((post) => (
+            <div key={post.id} className="post">
+              <h3>{post.title}</h3>
+              <p>{post.content}</p>
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {/* Load More Button */}
+      <button
+        onClick={() => fetchNextPage()}
+        disabled={!hasNextPage || isFetchingNextPage}
+      >
+        {isFetchingNextPage
+          ? 'Loading more...'
+          : hasNextPage
+          ? 'Load More'
+          : 'No more posts'}
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+#### Understanding useInfiniteQuery Returns
+
+```jsx
+const {
+  data,                   // { pages: [...], pageParams: [...] }
+  fetchNextPage,          // Function to load next page
+  fetchPreviousPage,      // Function to load previous page
+  hasNextPage,            // Boolean: more data available?
+  hasPreviousPage,        // Boolean: previous data available?
+  isFetchingNextPage,     // Boolean: fetching next page?
+  isFetchingPreviousPage, // Boolean: fetching previous page?
+  isLoading,              // Boolean: initial load?
+  isFetching,             // Boolean: any fetch in progress?
+  isError,                // Boolean: error occurred?
+  error,                  // Error object
+  refetch                 // Refetch all pages
+} = useInfiniteQuery({ ... });
+```
+
+#### Data Structure
+
+```jsx
+// data structure
+{
+  pages: [
+    { posts: [...], nextCursor: 10, hasMore: true },   // Page 1
+    { posts: [...], nextCursor: 20, hasMore: true },   // Page 2
+    { posts: [...], nextCursor: 30, hasMore: false }   // Page 3
+  ],
+  pageParams: [0, 10, 20]  // Parameters used for each page
+}
+```
+
+---
+
+#### Automatic Infinite Scroll (No Button)
+
+Use **Intersection Observer** to detect when user scrolls to bottom.
+
+##### Method 1: Using react-intersection-observer
+
+```bash
+npm install react-intersection-observer
+```
+
+```jsx
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInView } from 'react-intersection-observer';
+import { useEffect } from 'react';
+
+function InfiniteScrollPosts() {
+  const { ref, inView } = useInView();
+
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage
+  } = useInfiniteQuery({
+    queryKey: ['posts'],
+    queryFn: async ({ pageParam = 0 }) => {
+      const res = await fetch(`/api/posts?cursor=${pageParam}&limit=10`);
+      return res.json();
+    },
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    initialPageParam: 0
+  });
+
+  // Fetch next page when sentinel is in view
+  useEffect(() => {
+    if (inView && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  return (
+    <div>
+      {data?.pages.map((page, i) => (
+        <div key={i}>
+          {page.posts.map((post) => (
+            <div key={post.id} className="post-card">
+              <h3>{post.title}</h3>
+              <p>{post.content}</p>
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {/* Sentinel element - triggers load when visible */}
+      <div ref={ref} style={{ height: '20px' }}>
+        {isFetchingNextPage && <p>Loading more...</p>}
+      </div>
+
+      {!hasNextPage && <p>No more posts to load</p>}
+    </div>
+  );
+}
+```
+
+##### Method 2: Manual Intersection Observer
+
+```jsx
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { useRef, useEffect, useCallback } from 'react';
+
+function InfiniteScrollPosts() {
+  const observerTarget = useRef(null);
+
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage
+  } = useInfiniteQuery({
+    queryKey: ['posts'],
+    queryFn: async ({ pageParam = 0 }) => {
+      const res = await fetch(`/api/posts?cursor=${pageParam}&limit=10`);
+      return res.json();
+    },
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    initialPageParam: 0
+  });
+
+  // Set up intersection observer
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
+          fetchNextPage();
+        }
+      },
+      { threshold: 1 }
+    );
+
+    const currentTarget = observerTarget.current;
+    if (currentTarget) {
+      observer.observe(currentTarget);
+    }
+
+    return () => {
+      if (currentTarget) {
+        observer.unobserve(currentTarget);
+      }
+    };
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  return (
+    <div>
+      {data?.pages.map((page, i) => (
+        <div key={i}>
+          {page.posts.map((post) => (
+            <div key={post.id}>{post.title}</div>
+          ))}
+        </div>
+      ))}
+
+      {/* Observer target */}
+      <div ref={observerTarget} style={{ height: '1px' }} />
+
+      {isFetchingNextPage && <p>Loading...</p>}
+      {!hasNextPage && <p>End of list</p>}
+    </div>
+  );
+}
+```
+
+---
+
+#### Different Pagination Strategies
+
+##### Strategy 1: Cursor-based (Recommended)
+
+```jsx
+useInfiniteQuery({
+  queryKey: ['posts'],
+  queryFn: async ({ pageParam = 0 }) => {
+    const res = await fetch(`/api/posts?cursor=${pageParam}&limit=10`);
+    return res.json();
+  },
+  getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  initialPageParam: 0
+});
+
+// API returns: { posts: [...], nextCursor: 123 }
+```
+
+##### Strategy 2: Page-based
+
+```jsx
+useInfiniteQuery({
+  queryKey: ['posts'],
+  queryFn: async ({ pageParam = 1 }) => {
+    const res = await fetch(`/api/posts?page=${pageParam}&limit=10`);
+    return res.json();
+  },
+  getNextPageParam: (lastPage, allPages) => {
+    return lastPage.hasMore ? allPages.length + 1 : undefined;
+  },
+  initialPageParam: 1
+});
+
+// API returns: { posts: [...], hasMore: true, page: 1 }
+```
+
+##### Strategy 3: Offset-based
+
+```jsx
+useInfiniteQuery({
+  queryKey: ['posts'],
+  queryFn: async ({ pageParam = 0 }) => {
+    const res = await fetch(`/api/posts?offset=${pageParam}&limit=10`);
+    return res.json();
+  },
+  getNextPageParam: (lastPage, allPages) => {
+    const itemsLoaded = allPages.flatMap(p => p.posts).length;
+    return lastPage.hasMore ? itemsLoaded : undefined;
+  },
+  initialPageParam: 0
+});
+
+// API returns: { posts: [...], hasMore: true, total: 100 }
+```
+
+---
+
+#### Real-World Examples
+
+##### Example 1: Social Media Feed
+
+```jsx
+function SocialFeed() {
+  const { ref, inView } = useInView();
+
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading
+  } = useInfiniteQuery({
+    queryKey: ['feed'],
+    queryFn: async ({ pageParam = 0 }) => {
+      const res = await fetch(`/api/feed?cursor=${pageParam}`);
+      return res.json();
+    },
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    initialPageParam: 0,
+    staleTime: 60000  // Fresh for 1 minute
+  });
+
+  useEffect(() => {
+    if (inView && hasNextPage) {
+      fetchNextPage();
+    }
+  }, [inView, hasNextPage, fetchNextPage]);
+
+  if (isLoading) return <div>Loading feed...</div>;
+
+  return (
+    <div className="feed">
+      {data.pages.map((page, i) => (
+        <div key={i}>
+          {page.posts.map((post) => (
+            <div key={post.id} className="post">
+              <div className="post-header">
+                <img src={post.author.avatar} alt="" />
+                <strong>{post.author.name}</strong>
+              </div>
+              <p>{post.content}</p>
+              <div className="post-actions">
+                <button>❤️ {post.likes}</button>
+                <button>💬 {post.comments}</button>
+                <button>🔄 Share</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+
+      <div ref={ref} className="load-trigger">
+        {isFetchingNextPage && (
+          <div className="spinner">Loading more posts...</div>
+        )}
+      </div>
+
+      {!hasNextPage && (
+        <p className="end-message">You're all caught up! 🎉</p>
+      )}
+    </div>
+  );
+}
+```
+
+##### Example 2: Product Listing
+
+```jsx
+function ProductGrid() {
+  const [filters, setFilters] = useState({ category: 'all', sort: 'popular' });
+
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage
+  } = useInfiniteQuery({
+    queryKey: ['products', filters],
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await fetch(
+        `/api/products?page=${pageParam}&category=${filters.category}&sort=${filters.sort}`
+      );
+      return res.json();
+    },
+    getNextPageParam: (lastPage, pages) => {
+      return lastPage.hasMore ? pages.length + 1 : undefined;
+    },
+    initialPageParam: 1
+  });
+
+  return (
+    <div>
+      {/* Filters */}
+      <div className="filters">
+        <select 
+          value={filters.category} 
+          onChange={(e) => setFilters({ ...filters, category: e.target.value })}
+        >
+          <option value="all">All Categories</option>
+          <option value="electronics">Electronics</option>
+          <option value="clothing">Clothing</option>
+        </select>
+      </div>
+
+      {/* Product Grid */}
+      <div className="product-grid">
+        {data?.pages.map((page, i) => (
+          <div key={i} className="page">
+            {page.products.map((product) => (
+              <div key={product.id} className="product-card">
+                <img src={product.image} alt={product.name} />
+                <h3>{product.name}</h3>
+                <p className="price">${product.price}</p>
+                <button>Add to Cart</button>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {/* Load More Button */}
+      {hasNextPage && (
+        <button 
+          className="load-more"
+          onClick={() => fetchNextPage()}
+          disabled={isFetchingNextPage}
+        >
+          {isFetchingNextPage ? 'Loading...' : 'Load More Products'}
+        </button>
+      )}
+    </div>
+  );
+}
+```
+
+##### Example 3: Search Results with Infinite Scroll
+
+```jsx
+function SearchResults() {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 500);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading
+  } = useInfiniteQuery({
+    queryKey: ['search', debouncedQuery],
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await fetch(
+        `/api/search?q=${debouncedQuery}&page=${pageParam}`
+      );
+      return res.json();
+    },
+    getNextPageParam: (lastPage, pages) => {
+      return lastPage.hasMore ? pages.length + 1 : undefined;
+    },
+    initialPageParam: 1,
+    enabled: debouncedQuery.length > 0  // Only search if query exists
+  });
+
+  return (
+    <div>
+      <input
+        type="search"
+        placeholder="Search..."
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+      />
+
+      {isLoading && <p>Searching...</p>}
+
+      {data && (
+        <>
+          <p>Found {data.pages[0]?.total} results</p>
+          
+          {data.pages.map((page, i) => (
+            <div key={i}>
+              {page.results.map((result) => (
+                <div key={result.id} className="search-result">
+                  <h3>{result.title}</h3>
+                  <p>{result.description}</p>
+                </div>
+              ))}
+            </div>
+          ))}
+
+          {hasNextPage && (
+            <button onClick={() => fetchNextPage()}>
+              {isFetchingNextPage ? 'Loading...' : 'Show More Results'}
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+```
+
+##### Example 4: Chat Messages (Bi-directional)
+
+```jsx
+function ChatMessages({ chatId }) {
+  const {
+    data,
+    fetchNextPage,
+    fetchPreviousPage,
+    hasNextPage,
+    hasPreviousPage,
+    isFetchingNextPage,
+    isFetchingPreviousPage
+  } = useInfiniteQuery({
+    queryKey: ['messages', chatId],
+    queryFn: async ({ pageParam }) => {
+      const res = await fetch(`/api/messages/${chatId}?cursor=${pageParam}`);
+      return res.json();
+    },
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    getPreviousPageParam: (firstPage) => firstPage.prevCursor,
+    initialPageParam: undefined,
+    select: (data) => ({
+      pages: [...data.pages].reverse(),  // Reverse for chat order
+      pageParams: [...data.pageParams].reverse()
+    })
+  });
+
+  return (
+    <div className="chat-container">
+      {/* Load Older Messages */}
+      {hasPreviousPage && (
+        <button onClick={() => fetchPreviousPage()}>
+          {isFetchingPreviousPage ? 'Loading...' : 'Load Older Messages'}
+        </button>
+      )}
+
+      {/* Messages */}
+      {data?.pages.map((page, i) => (
+        <div key={i}>
+          {page.messages.map((msg) => (
+            <div key={msg.id} className="message">
+              <strong>{msg.author}</strong>: {msg.text}
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {/* Load Newer Messages */}
+      {hasNextPage && (
+        <button onClick={() => fetchNextPage()}>
+          {isFetchingNextPage ? 'Loading...' : 'Load Newer Messages'}
+        </button>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+#### Advanced Patterns
+
+##### Pattern 1: Flattening Pages
+
+```jsx
+function FlatList() {
+  const { data } = useInfiniteQuery({
+    queryKey: ['items'],
+    queryFn: fetchItems,
+    // ... config
+  });
+
+  // Flatten all pages into single array
+  const allItems = data?.pages.flatMap(page => page.items) ?? [];
+
+  return (
+    <ul>
+      {allItems.map(item => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+##### Pattern 2: Total Count
+
+```jsx
+function ItemList() {
+  const { data } = useInfiniteQuery({
+    queryKey: ['items'],
+    queryFn: fetchItems,
+    // ... config
+  });
+
+  const totalLoaded = data?.pages.flatMap(p => p.items).length ?? 0;
+  const totalAvailable = data?.pages[0]?.total ?? 0;
+
+  return (
+    <div>
+      <p>Showing {totalLoaded} of {totalAvailable} items</p>
+      {/* List items */}
+    </div>
+  );
+}
+```
+
+##### Pattern 3: Refetch All Pages
+
+```jsx
+function RefreshableList() {
+  const { data, refetch } = useInfiniteQuery({
+    queryKey: ['items'],
+    queryFn: fetchItems,
+    // ... config
+  });
+
+  const handleRefresh = () => {
+    refetch();  // Refetches ALL pages
+  };
+
+  return (
+    <div>
+      <button onClick={handleRefresh}>🔄 Refresh</button>
+      {/* List items */}
+    </div>
+  );
+}
+```
+
+---
+
+#### Performance Tips
+
+```jsx
+// ✅ GOOD: Use select to transform data
+useInfiniteQuery({
+  queryKey: ['posts'],
+  queryFn: fetchPosts,
+  select: (data) => ({
+    pages: data.pages.map(page => ({
+      ...page,
+      posts: page.posts.filter(p => p.published)  // Filter published only
+    })),
+    pageParams: data.pageParams
+  })
+});
+
+// ✅ GOOD: Set reasonable staleTime
+useInfiniteQuery({
+  queryKey: ['feed'],
+  queryFn: fetchFeed,
+  staleTime: 60000  // 1 minute - reduce unnecessary refetches
+});
+
+// ✅ GOOD: Limit initial pages
+useInfiniteQuery({
+  queryKey: ['posts'],
+  queryFn: fetchPosts,
+  maxPages: 3  // Only keep last 3 pages in memory
+});
+
+// ❌ BAD: Loading too many items per page
+queryFn: ({ pageParam }) => fetch(`/api?page=${pageParam}&limit=1000`)  // ❌ Too many!
+
+// ✅ GOOD: Reasonable page size
+queryFn: ({ pageParam }) => fetch(`/api?page=${pageParam}&limit=20`)  // ✅ Better
+```
+
+---
+
+#### Quick Reference
+
+```jsx
+// Basic setup
+const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
+  queryKey: ['items'],
+  queryFn: async ({ pageParam = 0 }) => {
+    const res = await fetch(`/api?cursor=${pageParam}`);
+    return res.json();
+  },
+  getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  initialPageParam: 0
+});
+
+// Render pages
+data?.pages.map((page, i) => (
+  <div key={i}>
+    {page.items.map(item => <div key={item.id}>{item.name}</div>)}
+  </div>
+));
+
+// Load more button
+<button onClick={() => fetchNextPage()} disabled={!hasNextPage}>
+  {isFetchingNextPage ? 'Loading...' : 'Load More'}
+</button>
+
+// Auto-load with intersection observer
+const { ref, inView } = useInView();
+useEffect(() => {
+  if (inView && hasNextPage) fetchNextPage();
+}, [inView, hasNextPage]);
+<div ref={ref} />
+```
+
+---
+
+#### Key Takeaways
+
+- ♾️ **useInfiniteQuery** - For paginated/infinite data
+- 📄 **Pages array** - `data.pages` contains all loaded pages
+- 🔢 **pageParam** - Tracks current cursor/page/offset
+- ⬇️ **fetchNextPage** - Load next page manually
+- ✅ **hasNextPage** - Boolean indicating more data available
+- 🔍 **getNextPageParam** - Determines next page parameter
+- 👀 **Intersection Observer** - Auto-load when scrolling
+- 🎯 **Cursor-based** - Best for real-time feeds
+- 📊 **Page-based** - Good for traditional pagination
+- 🔄 **refetch()** - Refreshes all pages
+
+**Perfect for:** Social feeds, product listings, search results, chat messages, image galleries!
+
+---
+
 ### DevTools (Optional but Helpful)
 
 ```bash
@@ -7622,6 +8401,765 @@ useQuery({
 - ⚡ **Intervals** - Choose based on urgency (1s critical, 60s non-critical)
 - 🧹 **Always cleanup** - Clear intervals to prevent memory leaks
 - 🔌 **WebSockets** - Use for true real-time (< 1s latency)
+
+---
+
+## 🔴 Redux Toolkit - State Management
+
+### What is Redux Toolkit?
+
+**Redux Toolkit (RTK)** is the **official, recommended way** to write Redux logic. It simplifies Redux by reducing boilerplate and providing best practices out of the box.
+
+### Why Redux Toolkit?
+
+**The Problem with Classic Redux:**
+```jsx
+// ❌ Classic Redux - Too much boilerplate
+// 1. Action types
+const INCREMENT = 'counter/increment';
+const DECREMENT = 'counter/decrement';
+
+// 2. Action creators
+const increment = () => ({ type: INCREMENT });
+const decrement = () => ({ type: DECREMENT });
+
+// 3. Reducer with switch statement
+function counterReducer(state = { value: 0 }, action) {
+  switch (action.type) {
+    case INCREMENT:
+      return { ...state, value: state.value + 1 };
+    case DECREMENT:
+      return { ...state, value: state.value - 1 };
+    default:
+      return state;
+  }
+}
+
+// 4. Store setup with middleware
+const store = createStore(
+  rootReducer,
+  applyMiddleware(thunk, logger)
+);
+```
+
+**With Redux Toolkit:**
+```jsx
+// ✅ Redux Toolkit - Simple and clean
+import { createSlice, configureStore } from '@reduxjs/toolkit';
+
+const counterSlice = createSlice({
+  name: 'counter',
+  initialState: { value: 0 },
+  reducers: {
+    increment: (state) => {
+      state.value += 1;  // Direct mutation (Immer handles immutability)
+    },
+    decrement: (state) => {
+      state.value -= 1;
+    }
+  }
+});
+
+const store = configureStore({
+  reducer: {
+    counter: counterSlice.reducer
+  }
+});
+// Redux DevTools and thunk middleware included automatically!
+```
+
+---
+
+### Installation
+
+```bash
+npm install @reduxjs/toolkit react-redux
+```
+
+---
+
+### Core Concepts
+
+1. **`configureStore`** - Creates Redux store with good defaults
+2. **`createSlice`** - Creates reducer + actions in one step
+3. **`createAsyncThunk`** - Handles async operations
+4. **`Provider`** - Makes store available to React components
+5. **`useSelector`** - Read state from store
+6. **`useDispatch`** - Dispatch actions
+
+---
+
+### Basic Setup - Counter Example
+
+#### Step 1: Create a Slice
+
+```jsx
+// features/counter/counterSlice.js
+import { createSlice } from '@reduxjs/toolkit';
+
+const counterSlice = createSlice({
+  name: 'counter',
+  initialState: {
+    value: 0
+  },
+  reducers: {
+    increment: (state) => {
+      state.value += 1;  // ✅ Direct mutation (thanks to Immer)
+    },
+    decrement: (state) => {
+      state.value -= 1;
+    },
+    incrementByAmount: (state, action) => {
+      state.value += action.payload;
+    },
+    reset: (state) => {
+      state.value = 0;
+    }
+  }
+});
+
+// Export actions (auto-generated)
+export const { increment, decrement, incrementByAmount, reset } = counterSlice.actions;
+
+// Export reducer
+export default counterSlice.reducer;
+```
+
+#### Step 2: Configure Store
+
+```jsx
+// app/store.js
+import { configureStore } from '@reduxjs/toolkit';
+import counterReducer from '../features/counter/counterSlice';
+
+export const store = configureStore({
+  reducer: {
+    counter: counterReducer
+  }
+});
+```
+
+#### Step 3: Provide Store to App
+
+```jsx
+// main.jsx or index.js
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { Provider } from 'react-redux';
+import { store } from './app/store';
+import App from './App';
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <Provider store={store}>
+    <App />
+  </Provider>
+);
+```
+
+#### Step 4: Use in Components
+
+```jsx
+// components/Counter.jsx
+import { useSelector, useDispatch } from 'react-redux';
+import { increment, decrement, incrementByAmount, reset } from '../features/counter/counterSlice';
+
+function Counter() {
+  // Read state
+  const count = useSelector((state) => state.counter.value);
+  
+  // Get dispatch function
+  const dispatch = useDispatch();
+
+  return (
+    <div>
+      <h1>Count: {count}</h1>
+      
+      <button onClick={() => dispatch(increment())}>+</button>
+      <button onClick={() => dispatch(decrement())}>-</button>
+      <button onClick={() => dispatch(incrementByAmount(5))}>+5</button>
+      <button onClick={() => dispatch(reset())}>Reset</button>
+    </div>
+  );
+}
+
+export default Counter;
+```
+
+---
+
+### Complete Example: Todo App
+
+#### 1. Create Todo Slice
+
+```jsx
+// features/todos/todoSlice.js
+import { createSlice } from '@reduxjs/toolkit';
+
+const todoSlice = createSlice({
+  name: 'todos',
+  initialState: {
+    items: [],
+    filter: 'all'  // 'all' | 'active' | 'completed'
+  },
+  reducers: {
+    addTodo: (state, action) => {
+      state.items.push({
+        id: Date.now(),
+        text: action.payload,
+        completed: false
+      });
+    },
+    toggleTodo: (state, action) => {
+      const todo = state.items.find(t => t.id === action.payload);
+      if (todo) {
+        todo.completed = !todo.completed;
+      }
+    },
+    deleteTodo: (state, action) => {
+      state.items = state.items.filter(t => t.id !== action.payload);
+    },
+    setFilter: (state, action) => {
+      state.filter = action.payload;
+    }
+  }
+});
+
+export const { addTodo, toggleTodo, deleteTodo, setFilter } = todoSlice.actions;
+export default todoSlice.reducer;
+```
+
+#### 2. Configure Store
+
+```jsx
+// app/store.js
+import { configureStore } from '@reduxjs/toolkit';
+import todoReducer from '../features/todos/todoSlice';
+
+export const store = configureStore({
+  reducer: {
+    todos: todoReducer
+  }
+});
+```
+
+#### 3. Todo Components
+
+```jsx
+// components/TodoApp.jsx
+import { useSelector, useDispatch } from 'react-redux';
+import { addTodo, toggleTodo, deleteTodo, setFilter } from '../features/todos/todoSlice';
+import { useState } from 'react';
+
+function TodoApp() {
+  const [input, setInput] = useState('');
+  const dispatch = useDispatch();
+  
+  // Read from store
+  const todos = useSelector((state) => state.todos.items);
+  const filter = useSelector((state) => state.todos.filter);
+
+  // Filter todos
+  const filteredTodos = todos.filter(todo => {
+    if (filter === 'active') return !todo.completed;
+    if (filter === 'completed') return todo.completed;
+    return true;
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (input.trim()) {
+      dispatch(addTodo(input));
+      setInput('');
+    }
+  };
+
+  return (
+    <div>
+      <h1>Todo List</h1>
+      
+      {/* Add Todo Form */}
+      <form onSubmit={handleSubmit}>
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="What needs to be done?"
+        />
+        <button type="submit">Add</button>
+      </form>
+
+      {/* Filters */}
+      <div>
+        <button onClick={() => dispatch(setFilter('all'))}>All</button>
+        <button onClick={() => dispatch(setFilter('active'))}>Active</button>
+        <button onClick={() => dispatch(setFilter('completed'))}>Completed</button>
+      </div>
+
+      {/* Todo List */}
+      <ul>
+        {filteredTodos.map(todo => (
+          <li key={todo.id}>
+            <input
+              type="checkbox"
+              checked={todo.completed}
+              onChange={() => dispatch(toggleTodo(todo.id))}
+            />
+            <span style={{ textDecoration: todo.completed ? 'line-through' : 'none' }}>
+              {todo.text}
+            </span>
+            <button onClick={() => dispatch(deleteTodo(todo.id))}>Delete</button>
+          </li>
+        ))}
+      </ul>
+
+      <p>{filteredTodos.length} items</p>
+    </div>
+  );
+}
+
+export default TodoApp;
+```
+
+---
+
+### Async Operations with createAsyncThunk
+
+For API calls and async operations.
+
+#### Example: Fetch Users
+
+```jsx
+// features/users/userSlice.js
+import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+
+// Async thunk for fetching users
+export const fetchUsers = createAsyncThunk(
+  'users/fetchUsers',
+  async () => {
+    const response = await fetch('https://jsonplaceholder.typicode.com/users');
+    return response.json();
+  }
+);
+
+const userSlice = createSlice({
+  name: 'users',
+  initialState: {
+    items: [],
+    status: 'idle',  // 'idle' | 'loading' | 'succeeded' | 'failed'
+    error: null
+  },
+  reducers: {},
+  extraReducers: (builder) => {
+    builder
+      .addCase(fetchUsers.pending, (state) => {
+        state.status = 'loading';
+      })
+      .addCase(fetchUsers.fulfilled, (state, action) => {
+        state.status = 'succeeded';
+        state.items = action.payload;
+      })
+      .addCase(fetchUsers.rejected, (state, action) => {
+        state.status = 'failed';
+        state.error = action.error.message;
+      });
+  }
+});
+
+export default userSlice.reducer;
+```
+
+#### Using in Component
+
+```jsx
+// components/UserList.jsx
+import { useEffect } from 'react';
+import { useSelector, useDispatch } from 'react-redux';
+import { fetchUsers } from '../features/users/userSlice';
+
+function UserList() {
+  const dispatch = useDispatch();
+  const users = useSelector((state) => state.users.items);
+  const status = useSelector((state) => state.users.status);
+  const error = useSelector((state) => state.users.error);
+
+  useEffect(() => {
+    if (status === 'idle') {
+      dispatch(fetchUsers());
+    }
+  }, [status, dispatch]);
+
+  if (status === 'loading') {
+    return <div>Loading...</div>;
+  }
+
+  if (status === 'failed') {
+    return <div>Error: {error}</div>;
+  }
+
+  return (
+    <ul>
+      {users.map(user => (
+        <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  );
+}
+
+export default UserList;
+```
+
+---
+
+### Async Thunk with Parameters
+
+```jsx
+// Fetch single user by ID
+export const fetchUserById = createAsyncThunk(
+  'users/fetchUserById',
+  async (userId) => {
+    const response = await fetch(`/api/users/${userId}`);
+    return response.json();
+  }
+);
+
+// Usage
+dispatch(fetchUserById(5));
+```
+
+---
+
+### Multiple Slices
+
+```jsx
+// app/store.js
+import { configureStore } from '@reduxjs/toolkit';
+import counterReducer from '../features/counter/counterSlice';
+import todoReducer from '../features/todos/todoSlice';
+import userReducer from '../features/users/userSlice';
+
+export const store = configureStore({
+  reducer: {
+    counter: counterReducer,
+    todos: todoReducer,
+    users: userReducer
+  }
+});
+
+// State structure:
+// {
+//   counter: { value: 0 },
+//   todos: { items: [], filter: 'all' },
+//   users: { items: [], status: 'idle', error: null }
+// }
+```
+
+---
+
+### Selectors
+
+Create reusable selectors for derived state.
+
+```jsx
+// features/todos/todoSlice.js
+// ... slice definition
+
+// Selectors
+export const selectAllTodos = (state) => state.todos.items;
+export const selectTodoById = (state, todoId) => 
+  state.todos.items.find(todo => todo.id === todoId);
+export const selectActiveTodos = (state) => 
+  state.todos.items.filter(todo => !todo.completed);
+export const selectCompletedTodos = (state) => 
+  state.todos.items.filter(todo => todo.completed);
+
+// Usage in component
+import { selectActiveTodos } from '../features/todos/todoSlice';
+
+function ActiveTodos() {
+  const activeTodos = useSelector(selectActiveTodos);
+  
+  return <ul>{/* render active todos */}</ul>;
+}
+```
+
+---
+
+### Real-World Example: Shopping Cart
+
+```jsx
+// features/cart/cartSlice.js
+import { createSlice } from '@reduxjs/toolkit';
+
+const cartSlice = createSlice({
+  name: 'cart',
+  initialState: {
+    items: [],
+    total: 0
+  },
+  reducers: {
+    addItem: (state, action) => {
+      const existingItem = state.items.find(item => item.id === action.payload.id);
+      
+      if (existingItem) {
+        existingItem.quantity += 1;
+      } else {
+        state.items.push({ ...action.payload, quantity: 1 });
+      }
+      
+      state.total += action.payload.price;
+    },
+    removeItem: (state, action) => {
+      const item = state.items.find(item => item.id === action.payload);
+      
+      if (item) {
+        state.total -= item.price * item.quantity;
+        state.items = state.items.filter(item => item.id !== action.payload);
+      }
+    },
+    updateQuantity: (state, action) => {
+      const { id, quantity } = action.payload;
+      const item = state.items.find(item => item.id === id);
+      
+      if (item) {
+        state.total -= item.price * item.quantity;
+        item.quantity = quantity;
+        state.total += item.price * quantity;
+      }
+    },
+    clearCart: (state) => {
+      state.items = [];
+      state.total = 0;
+    }
+  }
+});
+
+export const { addItem, removeItem, updateQuantity, clearCart } = cartSlice.actions;
+
+// Selectors
+export const selectCartItems = (state) => state.cart.items;
+export const selectCartTotal = (state) => state.cart.total;
+export const selectCartItemCount = (state) => 
+  state.cart.items.reduce((sum, item) => sum + item.quantity, 0);
+
+export default cartSlice.reducer;
+```
+
+```jsx
+// components/ShoppingCart.jsx
+import { useSelector, useDispatch } from 'react-redux';
+import { 
+  removeItem, 
+  updateQuantity, 
+  clearCart, 
+  selectCartItems, 
+  selectCartTotal,
+  selectCartItemCount
+} from '../features/cart/cartSlice';
+
+function ShoppingCart() {
+  const dispatch = useDispatch();
+  const items = useSelector(selectCartItems);
+  const total = useSelector(selectCartTotal);
+  const itemCount = useSelector(selectCartItemCount);
+
+  return (
+    <div>
+      <h2>Shopping Cart ({itemCount} items)</h2>
+      
+      {items.length === 0 ? (
+        <p>Your cart is empty</p>
+      ) : (
+        <>
+          {items.map(item => (
+            <div key={item.id} className="cart-item">
+              <img src={item.image} alt={item.name} />
+              <div>
+                <h3>{item.name}</h3>
+                <p>${item.price}</p>
+              </div>
+              <input
+                type="number"
+                value={item.quantity}
+                min="1"
+                onChange={(e) => 
+                  dispatch(updateQuantity({ id: item.id, quantity: Number(e.target.value) }))
+                }
+              />
+              <button onClick={() => dispatch(removeItem(item.id))}>Remove</button>
+            </div>
+          ))}
+          
+          <div className="cart-summary">
+            <h3>Total: ${total.toFixed(2)}</h3>
+            <button onClick={() => dispatch(clearCart())}>Clear Cart</button>
+            <button>Checkout</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export default ShoppingCart;
+```
+
+---
+
+### RTK Query (Bonus - API Fetching)
+
+Built-in data fetching solution.
+
+```jsx
+// services/api.js
+import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
+
+export const api = createApi({
+  reducerPath: 'api',
+  baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
+  endpoints: (builder) => ({
+    getPosts: builder.query({
+      query: () => 'posts'
+    }),
+    getPostById: builder.query({
+      query: (id) => `posts/${id}`
+    }),
+    addPost: builder.mutation({
+      query: (newPost) => ({
+        url: 'posts',
+        method: 'POST',
+        body: newPost
+      })
+    })
+  })
+});
+
+export const { useGetPostsQuery, useGetPostByIdQuery, useAddPostMutation } = api;
+```
+
+```jsx
+// app/store.js
+import { configureStore } from '@reduxjs/toolkit';
+import { api } from '../services/api';
+
+export const store = configureStore({
+  reducer: {
+    [api.reducerPath]: api.reducer
+  },
+  middleware: (getDefaultMiddleware) =>
+    getDefaultMiddleware().concat(api.middleware)
+});
+```
+
+```jsx
+// components/Posts.jsx
+import { useGetPostsQuery, useAddPostMutation } from '../services/api';
+
+function Posts() {
+  const { data: posts, isLoading, error } = useGetPostsQuery();
+  const [addPost, { isLoading: isAdding }] = useAddPostMutation();
+
+  if (isLoading) return <div>Loading...</div>;
+  if (error) return <div>Error!</div>;
+
+  return (
+    <div>
+      {posts.map(post => (
+        <div key={post.id}>{post.title}</div>
+      ))}
+      <button onClick={() => addPost({ title: 'New Post' })}>
+        Add Post
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+### Redux Toolkit vs Context API
+
+| Feature | Redux Toolkit | Context API |
+|---------|---------------|-------------|
+| **Setup** | More boilerplate | Minimal setup |
+| **Performance** | Optimized with selectors | Re-renders all consumers |
+| **DevTools** | Excellent time-travel debugging | Basic |
+| **Middleware** | Built-in (thunk) | Manual setup |
+| **Async** | createAsyncThunk | Manual with useEffect |
+| **Best for** | Large apps, complex state | Small/medium apps, theme, auth |
+
+---
+
+### When to Use Redux Toolkit
+
+#### ✅ Use Redux Toolkit when:
+- Large application with complex state
+- State shared across many components
+- Need time-travel debugging
+- Frequent state updates
+- Complex async logic
+- Team prefers centralized state
+
+#### ❌ Don't use when:
+- Small app with simple state
+- State only used in few components
+- Learning React (start with useState/Context)
+- Over-engineering a simple problem
+
+---
+
+### Quick Reference
+
+```jsx
+// 1. Create slice
+const slice = createSlice({
+  name: 'feature',
+  initialState: {},
+  reducers: {
+    action: (state, action) => {
+      state.value = action.payload;
+    }
+  }
+});
+
+// 2. Configure store
+const store = configureStore({
+  reducer: {
+    feature: slice.reducer
+  }
+});
+
+// 3. Provide to app
+<Provider store={store}>
+  <App />
+</Provider>
+
+// 4. Use in components
+const value = useSelector((state) => state.feature.value);
+const dispatch = useDispatch();
+dispatch(action(newValue));
+
+// 5. Async thunk
+const fetchData = createAsyncThunk('fetch', async () => {
+  const res = await fetch('/api');
+  return res.json();
+});
+```
+
+---
+
+### Key Takeaways
+
+- 🔴 **Redux Toolkit** - Official, simplified Redux
+- 🍕 **createSlice** - Creates reducer + actions in one
+- 🏪 **configureStore** - Sets up store with good defaults
+- 📊 **useSelector** - Read state from store
+- 📤 **useDispatch** - Dispatch actions
+- ⚡ **createAsyncThunk** - Handle async operations
+- 🔄 **Immer** - Built-in, allows direct state "mutation"
+- 🛠️ **DevTools** - Included automatically
+- 🎯 **RTK Query** - Built-in data fetching (optional)
+- ✅ **Best for** - Large apps with complex, shared state
+
+**Remember:** Redux Toolkit is Redux made simple. Start here, not classic Redux!
 
 ---
 
